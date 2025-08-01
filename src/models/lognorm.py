@@ -2,17 +2,19 @@
 # Defines the LognormWSBM class, a specific implementation of WSBM with log-normal edge weights.
 
 from .wsbm import WSBM
+#from .wdcsbm import WDCSBM, GInputType
 import numpy as np
 from numpy.typing import NDArray
 from scipy.stats import lognorm, norm
 from typing import Optional
 
 from ..utils.string_utils import *
+from ..utils.utils import *
 
 
 class LognormWSBM(WSBM):
 	name = 'LogN'
-	param_string = 'σ'
+	param_string = 'Σ'
 
 	def __init__(self, 
 				 K: int, 

@@ -3,6 +3,7 @@
 # and computes a range of structural and embedding-based metrics.
 
 from .models.wsbm import WSBM
+#from .models.wdcsbm import WDCSBM, GInputType
 from .transformations import *
 from .metrics import *
 from .utils.utils import *
@@ -19,23 +20,38 @@ from sklearn.metrics.cluster import contingency_matrix
 class TWSBM:
 	"""Class representing a transformed WSBM instance."""
 
-	def __init__(self, 
-				 model: WSBM, 
-				 transformation: WeightTransform,
+	def __init__(self,
 				 A: NDArray[np.float64], 
-				 Z: NDArray[np.int32]):
+				 Z: NDArray[np.int32],
+				 model: Optional[WSBM] = None, 
+				 transformation: Optional[WeightTransform] = None,
+				 K: Optional[int] = None,
+				 q_outliers: float = 0.01):
 		"""Initialize a TWSBM instance.\n
 		Parameters
 		----------
-		model : WSBM
-			The model of the sample.
-		transformation : WeightTransform
-			The weight transformation having been applied to the sample.
 		A : NDArray[np.float64]
 			The transformed weight matrix sampled, a 2-D array of shape (n, n).
 		Z : NDArray[np.int32]
 			The community labels of the sample, a 1-D array of length n.
+		model : Optional[WSBM]
+			The WSBM model used to generate the sample. If None, the model is not specified.
+		transformation : Optional[WeightTransform]
+			The weight transformation applied to the sample. If None, the transformation is not specified.
+		K : Optional[int]
+			The number of communities in the model. If None, it is inferred from the model.
+		q_outliers : float
+			The proportion of outliers to remove from the data before fitting the GMM, by default 0.01.
 		"""
+
+		if transformation is None: transformation = IdentityTransform()
+
+		if model is not None and transformation is not None:
+			self.K = model.K
+		elif K is not None:
+			self.K = K
+		else:
+			raise ValueError("Either model and transformation must be specified, or K must be provided.")
 		
 		self.model = model
 		self.transformation = transformation
@@ -43,14 +59,14 @@ class TWSBM:
 		self.A = A
 		self.Z = Z
 
-
 		# Theoretical mean and variance of the model and its embedding
-		self.B, self.C = model.theoretical_mean_variance(transformation)
-		self.M, self.Σ = self.theoretical_embedding_mean_covariance(self.B, self.C, model.π, model.K)
+		if model is not None and transformation is not None:
+			self.B, self.C = model.theoretical_mean_variance(transformation)
+			self.M, self.Σ = self.theoretical_embedding_mean_covariance(self.B, self.C, model.π, self.K)
 
 		# Empirical mean and variance of the model and its embedding
-		self.X_A, _ = spectral_embedding(A, model.K)
-		self.GMM = self.fit_gmm(self.X_A, model.K)
+		self.X_A, _ = spectral_embedding(A, self.K)
+		self.GMM = self.fit_gmm(self.X_A, self.K, q_outliers=q_outliers)
 		self.Z_hat, self.π_hat, self.M_hat, self.Σ_hat = self.get_gmm_estimates(self.GMM, self.X_A)
 
 		mapper = self.best_permutation(Z, self.Z_hat)
@@ -59,24 +75,26 @@ class TWSBM:
 		self.M_hat = self.M_hat[mapper, :]
 		self.Σ_hat = self.Σ_hat[mapper, :, :]
 
-		self.B_hat, self.C_hat = self.empirical_mean_variance(A, self.Z_hat, model.K)
+		self.B_hat, self.C_hat = self.empirical_mean_variance(A, self.Z_hat, self.K)
 
 		# Metrics
 		self.ARI = ARI(Z, self.Z_hat)
 		self.GMM_score = GMMScore(self.GMM, self.X_A)
 
 		# Theoretical and empirical Chernoff information
-		self.C_graph  = ChernoffGraph(self.B, self.C, model.K, model.π)
-		self.Ĉ_graph  = ChernoffGraph(self.B_hat, self.C_hat, model.K, self.π_hat)
+		if model is not None and transformation is not None:
+			self.C_graph  = ChernoffGraph(self.B, self.C, self.K, model.π)
+			self.C_embed  = ChernoffEmbedding(self.M, self.Σ, self.K)
+		
+		self.Ĉ_graph  = ChernoffGraph(self.B_hat, self.C_hat, self.K, self.π_hat)
 		self.gĈ_graph = GatedChernoffGraph(self.Ĉ_graph, self.GMM_score)
-
-		self.C_embed  = ChernoffEmbedding(self.M, self.Σ, model.K)
-		self.Ĉ_embed  = ChernoffEmbedding(self.M_hat, self.Σ_hat, model.K)
+		self.Ĉ_embed  = ChernoffEmbedding(self.M_hat, self.Σ_hat, self.K)
 		self.gĈ_embed = GatedChernoffEmbedding(self.Ĉ_embed, self.GMM_score)
 
-		assert np.allclose(self.C_graph, self.C_embed, rtol = 1e-5), "Chernoff graph and Chernoff embedding informations do not match."
+		if model is not None and transformation is not None:
+			assert np.allclose(self.C_graph, self.C_embed, rtol = 1e-5), "Chernoff graph and Chernoff embedding informations do not match."
 
-		self.M, self.Σ = self.procrustes_align_theoretical_embedding_mean_covariance(self.M, self.Σ, self.X_A, self.Z, model.K)
+			self.M, self.Σ = self.procrustes_align_theoretical_embedding_mean_covariance(self.M, self.Σ, self.X_A, self.Z, self.K)
 
 		
 
@@ -122,7 +140,7 @@ class TWSBM:
 		X_B, Λ_B = spectral_embedding(B, d)
 		I_pq = np.sign(np.diag(Λ_B))
 		Δ = X_B.T @ np.diag(π) @ X_B
-		Δ_inv = np.linalg.inv(Δ)
+		Δ_inv = np.linalg.pinv(Δ)
 
 		M = X_B
 		Σ = ((I_pq @ Δ_inv)[None, :, :] @ np.einsum('l,kl,li,lj->kij', π, C, X_B, X_B) @ (Δ_inv @ I_pq)[None, :, :])
@@ -151,7 +169,7 @@ class TWSBM:
 	
 	@staticmethod
 	def get_gmm_estimates(GMM: GaussianMixture,
-					      X: NDArray[np.float64]) -> tuple[NDArray[np.int32], NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
+						  X: NDArray[np.float64]) -> tuple[NDArray[np.int32], NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
 		"""Get the estimates from the fitted GMM.\n
 		Parameters
 		----------
@@ -177,7 +195,7 @@ class TWSBM:
 
 		return (np.asarray(Z_hat, dtype=np.int32),
 		  		np.asarray(π_hat, dtype=np.float64),
-		        np.asarray(M_hat, dtype=np.float64), 
+				np.asarray(M_hat, dtype=np.float64), 
 				np.asarray(Σ_hat, dtype=np.float64))
 	
 	@staticmethod
@@ -205,14 +223,14 @@ class TWSBM:
 		return mapper
 	
 	@staticmethod
-	def empirical_mean_variance(A: NDArray[np.float64],
-							    Z_hat: NDArray[np.int32], 
-							    K: int) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+	def empirical_mean_variance(A: Union[NDArray[np.float64], scipy.sparse.spmatrix],
+								Z_hat: NDArray[np.int32], 
+								K: int) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
 		"""Calculate the empirical block mean and variance of the model.\n
 		Parameters
 		----------
 		A : NDArray[np.float64]
-			The weight matrix, a 2-D array of shape (n, n).
+			The weight matrix, shape (n, n), dense or sparse.
 		Z_hat : NDArray[np.int32]
 			1-D array of length n, where Z_hat[i] is the estimated community index (0 to K-1) for node i.
 		K : int
@@ -228,8 +246,14 @@ class TWSBM:
 		edges = nodes[:, None] * nodes[None, :] - np.diag(nodes)
 
 		H  = np.eye(K)[Z_hat]
-		S1 = H.T @ A @ H
-		S2 = H.T @ A**2 @ H
+
+		if scipy.sparse.issparse(A):
+			S1 = H.T.dot(A.dot(H)) #type: ignore
+			S2 = H.T.dot((A.multiply(A)).dot(H)) #type: ignore
+		else:
+			assert isinstance(A, np.ndarray), "A must be a numpy array or a sparse matrix."
+			S1 = H.T @ A @ H
+			S2 = H.T @ A**2 @ H
 
 		with np.errstate(divide='ignore', invalid='ignore'):
 			B_hat = S1 / edges
@@ -306,11 +330,11 @@ class TWSBM:
 		Σ_fit = beta**2 * (R @ Σ @ R.T) #TODO Does not fit the data well
 		# TODO
 		# ChernoffEmbedding(M_hat_Z, Σ_hat_Z, K)
-		# ChernoffEmbedding(self.M_hat, self.Σ_hat, model.K) (when ARI is high)
+		# ChernoffEmbedding(self.M_hat, self.Σ_hat, self.K) (when ARI is high)
 		# ChernoffEmbedding(self.M, self.Σ, self.K) after procrustes alignment
 		# do not seem to match with the following 3 (which are matching)
-		# ChernoffGraph(self.B, self.C, model.K, model.π)
-		# ChernoffGraph(self.B_hat, self.C_hat, model.K, self.π_hat) (when ARI is high)
+		# ChernoffGraph(self.B, self.C, self.K, model.π)
+		# ChernoffGraph(self.B_hat, self.C_hat, self.K, self.π_hat) (when ARI is high)
 		# ChernoffEmbedding(self.M, self.Σ, self.K) before procrustes alignment
 		# Why?
 

@@ -2,12 +2,14 @@
 # Defines the BetaWSBM class, a specific implementation of WSBM with Beta-distributed edge weights.
 
 from .wsbm import WSBM
+#from .wdcsbm import WDCSBM, GInputType
 import numpy as np
 from numpy.typing import NDArray
 from scipy.stats import beta
 from typing import Optional
 
 from ..utils.string_utils import *
+from ..utils.utils import *
 
 class BetaWSBM(WSBM):
 	"""Weighted Stochastic Block Model with Beta-distributed edge weights."""

@@ -6,6 +6,8 @@ from numpy.typing import NDArray
 from abc import ABC, abstractmethod
 from scipy.stats import rankdata
 from matplotlib import colors
+from scipy.sparse import csr_matrix, issparse
+from typing import Union
 
 cmap_blue  = colors.LinearSegmentedColormap.from_list("blue", ["#00FFFF", "#0050FF"])
 norm_pow_γ = colors.Normalize(vmin=0.5, vmax=2.0) #magic numbers
@@ -21,16 +23,16 @@ class WeightTransform(ABC):
 		pass
 
 	@abstractmethod
-	def __call__(self, A: NDArray[np.float64]) -> NDArray[np.float64]:
+	def __call__(self, A: Union[NDArray[np.float64], csr_matrix]) -> Union[NDArray[np.float64], csr_matrix]:
 		""" Apply the transformation to the weight matrix A.
 		Parameters
 		----------
-		A : NDArray[np.float64]
-			The weight matrix to transform, a 2-D array of shape (n, n).\n
+		A : Union[NDArray[np.float64], csr_matrix]
+			The input weight matrix, of shape (n, n), dense or sparse.\n
 		Returns
 		-------
 		tA : NDArray[np.float64]
-			The transformed weight matrix, a 2-D array of shape (n, n)."""
+			The transformed weight matrix, of shape (n, n), dense or sparse."""
 		pass
 	
 	@abstractmethod
@@ -48,7 +50,35 @@ class WeightTransform(ABC):
 		""" Return a tuple for pickling the transformation."""
 		pass
 
-class IdentityTransform(WeightTransform):
+class ElementwiseTransform(WeightTransform):
+	"""Abstract class for elementwise transformations of edge weights."""
+	def __call__(self, A: Union[NDArray[np.float64], csr_matrix]) -> Union[NDArray[np.float64], csr_matrix]:
+		""" Apply the elementwise transformation to the weight matrix A.
+		Parameters
+		----------
+		A : Union[NDArray[np.float64], csr_matrix]
+			The input weight matrix, of shape (n, n), dense or sparse.\n
+		Returns
+		-------
+		tA : Union[NDArray[np.float64], csr_matrix]
+			The transformed weight matrix, of shape (n, n), dense or sparse."""
+		if issparse(A):
+			A = A.copy().tocsr() # type: ignore
+			A.data = self.f_data(A.data) # type: ignore
+			A.eliminate_zeros() # type: ignore
+			return A
+		else:
+			tA = A.copy()
+			flat = tA.flat
+			flat[:] = self.f_data(flat) # type: ignore
+			return tA
+		
+	@abstractmethod
+	def f_data(self, d: NDArray[np.float64]) -> NDArray[np.float64]:
+		"""Apply the transformation to the data of the sparse matrix."""
+		pass
+
+class IdentityTransform(ElementwiseTransform):
 	"""Identity transformation: returns the input matrix unchanged."""
 
 	def __init__(self):
@@ -56,9 +86,8 @@ class IdentityTransform(WeightTransform):
 		self.id = 'Id'
 		self.color = cmap_blue(norm_pow_γ(1))
 
-	def __call__(self, A: NDArray[np.float64]) -> NDArray[np.float64]:
-		tA = A.copy()
-		return tA
+	def f_data(self, d: NDArray[np.float64]) -> NDArray[np.float64]:
+		return d.copy()
 	
 	def __eq__(self, other) -> bool:
 		return isinstance(other, IdentityTransform)
@@ -69,18 +98,18 @@ class IdentityTransform(WeightTransform):
 	def __reduce__(self) -> tuple[type, tuple]:
 		return (self.__class__, ())
 	
-class OppositeTransform(WeightTransform):
+class OppositeTransform(ElementwiseTransform):
 	"""Opposite transformation: returns 1 - A for positive elements, 0 otherwise."""
 
 	def __init__(self):
 		self.name = "Opposite"
 		self.id = 'Opp'
 		self.color = 'orange'
-
-	def __call__(self, A: NDArray[np.float64]) -> NDArray[np.float64]:
-		tA = np.clip(A, 0, None)
-		tA[tA > 0] = 1 - tA[tA > 0]
-		return tA
+	
+	def f_data(self, d: NDArray[np.float64]) -> NDArray[np.float64]:
+		td = np.clip(d, 0, None)
+		td[td > 0] = 1 - td[td > 0]
+		return td
 	
 	def __eq__(self, other) -> bool:
 		return isinstance(other, OppositeTransform)
@@ -91,18 +120,18 @@ class OppositeTransform(WeightTransform):
 	def __reduce__(self) -> tuple[type, tuple]:
 		return (self.__class__, ())
 
-class LogTransform(WeightTransform):
+class LogTransform(ElementwiseTransform):
 	"""Logarithmic transformation: returns -log(A) for positive elements, 0 otherwise."""
 
 	def __init__(self):
 		self.name = "Logarithmic"
 		self.id = 'Log'
 		self.color = 'green'
-
-	def __call__(self, A: NDArray[np.float64]) -> NDArray[np.float64]:
-		tA = np.clip(A, 0, None)
-		tA[tA > 0] = -np.log(tA[tA > 0])
-		return tA
+	
+	def f_data(self, d: NDArray[np.float64]) -> NDArray[np.float64]:
+		td = np.clip(d, 0, None)
+		td[td > 0] = -np.log(td[td > 0])
+		return td
 	
 	def __eq__(self, other) -> bool:
 		return isinstance(other, LogTransform)
@@ -113,7 +142,7 @@ class LogTransform(WeightTransform):
 	def __reduce__(self) -> tuple[type, tuple]:
 		return (self.__class__, ())
 
-class ThresholdTransform(WeightTransform):
+class ThresholdTransform(ElementwiseTransform):
 	"""Threshold transformation: returns 1 if A <= τ, 0 otherwise."""
 
 	def __init__(self, τ: float = 0.05):
@@ -130,11 +159,11 @@ class ThresholdTransform(WeightTransform):
 
 		self.τ = τ
 		self.param_name = 'τ'
-
-	def __call__(self, A: NDArray[np.float64]) -> NDArray[np.float64]:
-		tA = A.copy()
-		tA[tA > 0] = (tA[tA > 0] <= self.τ).astype(float)
-		return tA
+	
+	def f_data(self, d: NDArray[np.float64]) -> NDArray[np.float64]:
+		td = np.clip(d, 0, None)
+		td[td > 0] = (td[td > 0] <= self.τ).astype(float)
+		return td
 	
 	def __eq__(self, other) -> bool:
 		return isinstance(other, ThresholdTransform) and self.τ == other.τ
@@ -153,17 +182,29 @@ class RankTransform(WeightTransform):
 		self.id = 'Rank'
 		self.color = 'purple'
 
-	def __call__(self, A: NDArray[np.float64]) -> NDArray[np.float64]:
-		iu = np.triu_indices_from(A, k=1)
-		p_iu = A[iu] > 0
-		ranks = rankdata(A[iu][p_iu], method='ordinal')
+	def __call__(self, A: Union[NDArray[np.float64], csr_matrix]) -> Union[NDArray[np.float64], csr_matrix]:
+		if issparse(A):
+			coo = A.tocoo() # type: ignore
+			mask = (coo.row<coo.col) & (coo.data>0)
+			vals = coo.data[mask]
+			ranks = rankdata(vals, method='ordinal')
+			normed = ranks/(ranks.size+1)
+			r, c = coo.row[mask], coo.col[mask]
+			rows = np.r_[r, c]; cols = np.r_[c, r]
+			data = np.r_[normed, normed]
 
-		tA = np.zeros_like(A, dtype=np.float64)
-		tA[iu[0][p_iu], iu[1][p_iu]] = ranks / (ranks.size + 1)
-		tA = tA + tA.T
-		np.fill_diagonal(tA, 0)
-		
-		return tA
+			return csr_matrix((data,(rows,cols)), shape=A.shape)
+		else:
+			iu = np.triu_indices_from(A, k=1) # type: ignore
+			p_iu = A[iu] > 0
+			ranks = rankdata(A[iu][p_iu], method='ordinal')
+
+			tA = np.zeros_like(A, dtype=np.float64)
+			tA[iu[0][p_iu], iu[1][p_iu]] = ranks / (ranks.size + 1)
+			tA = tA + tA.T
+			np.fill_diagonal(tA, 0)
+			
+			return tA
 	
 	def __eq__(self, other) -> bool:
 		return isinstance(other, RankTransform)
@@ -174,7 +215,7 @@ class RankTransform(WeightTransform):
 	def __reduce__(self) -> tuple[type, tuple]:
 		return (self.__class__, ())
 	
-class QuantileTransform(WeightTransform):
+class QuantileTransform(ElementwiseTransform):
 	"""Quantile transformation: returns 1 if A <= τ, 0 otherwise, where τ is the q-th quantile of positive elements in A."""
 
 	def __init__(self, q: float = 0.1):
@@ -194,11 +235,11 @@ class QuantileTransform(WeightTransform):
 		self.q = q
 		self.param_name = 'q'
 
-	def __call__(self, A: NDArray[np.float64]) -> NDArray[np.float64]:
-		tA = A.copy()
-		τ = np.quantile(tA[tA > 0], self.q)
-		tA[tA > 0] = (tA[tA > 0] <= τ).astype(float)
-		return tA
+	def f_data(self, d: NDArray[np.float64]) -> NDArray[np.float64]:
+		td = d.copy()
+		τ = np.quantile(td[td > 0], self.q)
+		td[td > 0] = (td[td > 0] <= τ).astype(float)
+		return td
 	
 	def __eq__(self, other) -> bool:
 		return isinstance(other, QuantileTransform) and self.q == other.q
@@ -209,7 +250,7 @@ class QuantileTransform(WeightTransform):
 	def __reduce__(self) -> tuple[type, tuple]:
 		return (self.__class__, (self.q,))
 	
-class PowerTransform(WeightTransform):
+class PowerTransform(ElementwiseTransform):
 	"""Power transformation: returns A^γ."""
 
 	def __init__(self, γ = 1.41):
@@ -228,11 +269,11 @@ class PowerTransform(WeightTransform):
 
 		self.γ = γ
 		self.param_name = 'γ'
-
-	def __call__(self, A: NDArray[np.float64]) -> NDArray[np.float64]:
-		tA = A.copy()
-		tA = tA ** self.γ
-		return tA
+	
+	def f_data(self, d: NDArray[np.float64]) -> NDArray[np.float64]:
+		td = d.copy()
+		td = td ** self.γ
+		return td
 	
 	def __eq__(self, other) -> bool:
 		return isinstance(other, PowerTransform) and self.γ == other.γ

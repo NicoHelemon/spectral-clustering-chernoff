@@ -184,7 +184,7 @@ def ChernoffEmbedding(M: NDArray[np.float64],
     def objective(t: float, k: int, l: int) -> float:
         Σ_kl_t = (1 - t) * Σ[k] + t * Σ[l]
         mk_ml = M[k] - M[l]
-        matrix_res = mk_ml.T @ np.linalg.inv(Σ_kl_t) @ mk_ml
+        matrix_res = mk_ml.T @ np.linalg.pinv(Σ_kl_t) @ mk_ml
         return 0.5 * t * (1 - t) * matrix_res.item()
     
     def neg_objective(t: float, k: int, l: int) -> float:

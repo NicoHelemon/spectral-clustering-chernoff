@@ -1,0 +1,10 @@
+{
+  "shape": [
+    161,
+    161
+  ],
+  "n_labels": 161,
+  "n_communities": 5,
+  "sparse": false,
+  "max_weight": 1302.0
+}

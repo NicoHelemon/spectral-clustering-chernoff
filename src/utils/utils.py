@@ -6,14 +6,17 @@ from numpy.typing import NDArray
 from scipy.linalg import orthogonal_procrustes
 from scipy.sparse.linalg import eigsh
 from scipy.linalg import eigh
+import scipy.sparse
+from typing import Optional, Union, Sequence, Any, Tuple
+from scipy.stats import rv_discrete, rv_continuous
 
-def spectral_embedding(A: NDArray[np.float64], 
+def spectral_embedding(A: Union[np.ndarray, scipy.sparse.spmatrix], 
 					   d: int) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
 		"""Calculate the spectral embedding of the matrix A.\n
 		Parameters
 		----------
-		A : NDArray[np.float64]
-			The input matrix, a 2-D array of shape (n, n).
+		A : NDArray[np.float64, scipy.sparse.spmatrix]
+			The input matrix, shape (n, n), dense or sparse.
 		d : int
 			Number of dimensions for the embedding.\n
 		Returns
@@ -23,12 +26,24 @@ def spectral_embedding(A: NDArray[np.float64],
 		Λ : NDArray[np.float64]
 			The eigenvalues of the matrix, a 1-D array of length d."""
 
-		if d > A.shape[0]:
-			raise ValueError(f'd must be less than or equal to the number of nodes ({A.shape[0]}), got {d}.')
-		elif d == A.shape[0]:
-			vals, vecs = eigh(A.astype(np.float32))
+		n = A.shape[0]
+		if d > n:
+			raise ValueError(f'd must be ≤ number of nodes ({n}), got {d}.')
+
+		# Choose solver depending on sparsity and spectrum size
+		if scipy.sparse.issparse(A):
+			A_sp = A.asfptype() #type: ignore
+			if d < n:
+				vals, vecs = eigsh(A_sp, k=d, which='LM')
+			else:
+				A_dense = A_sp.toarray()
+				vals, vecs = eigh(A_dense)
 		else:
-			vals, vecs = eigsh(A.astype(np.float32), k=d, which='LM')
+			A_arr = A.astype(np.float32) #type: ignore
+			if d < n:
+				vals, vecs = eigsh(A_arr, k=d, which='LM')
+			else:
+				vals, vecs = eigh(A_arr)
 
 		# #Ensure the eigenvectors are in the same direction
 		# #by aligning them with the largest absolute value in each column
@@ -141,3 +156,47 @@ def procrustes_align(Source: NDArray[np.float64],
 	beta = sigma / np.linalg.norm(S0, 'fro')**2
 
 	return R, beta
+
+class ConstantDist:
+	"""The constant distribution."""
+
+	def __init__(self, value: float):
+		"""Initialize a constant distribution with a fixed value."""
+		self.value = value
+		xk = np.array([value])
+		pk = np.array([1.0])
+		self.dist = rv_discrete(name='constant', values=(xk, pk))
+
+	def rvs(self, size=None, random_state=None):
+		if size is None:
+			return self.value
+		return np.full(size, self.value)
+
+	def support(self):
+		return (self.value, self.value)
+
+	def mean(self):
+		return self.value
+
+def summarize_dist(g: Union[rv_discrete, rv_continuous, ConstantDist]) -> Tuple[str, Any, Any]:
+	"""Summarize a distribution by its name, shape arguments, and parameters.\n
+	Parameters
+	----------
+	g : Union[rv_discrete, rv_continuous, ConstantDist]
+		The distribution to summarize.\n
+	Returns
+	-------
+		tuple[str, Any, Any]
+			A tuple containing the distribution name, shape arguments, and parameters."""
+	if isinstance(g, ConstantDist):
+		return ("constant", g.value, ())
+
+	# scipy rv_continuous and rv_discrete store their init kwargs in .kwds
+	if hasattr(g, "name") and hasattr(g, "kwds"):
+		# e.g. ("beta", (("a", 2.3), ("b", 1.0)), (("loc",0),("scale",1)))
+		dist_params = tuple(sorted(g.kwds.items())) # type: ignore
+		# some distributions also take shape arguments in g.args
+		shape_args = tuple(g.args) if hasattr(g, "args") else () # type: ignore
+		return (g.name, shape_args, dist_params)
+
+	raise TypeError(f"Don't know how to summarize {g!r}")
