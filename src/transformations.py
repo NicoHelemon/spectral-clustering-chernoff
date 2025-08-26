@@ -15,6 +15,12 @@ norm_pow_γ = colors.Normalize(vmin=0.5, vmax=2.0) #magic numbers
 cmap_pink  = colors.LinearSegmentedColormap.from_list("pink_red", ["#FFB2C6", "#FF0000"])
 norm_qtl_q = colors.Normalize(vmin=0.01, vmax=0.5) #magic numbers
 
+cmap_green = colors.LinearSegmentedColormap.from_list("green", ["#00FF00", "#006400"])
+norm_logp  = colors.Normalize(vmin=0.5, vmax=2.0) #magic numbers
+
+cmap_purple = colors.LinearSegmentedColormap.from_list("purple", ["#E6E6FA", "#800080"])
+norm_qthr 	= colors.Normalize(vmin=0.01, vmax=0.5) #magic numbers
+
 class WeightTransform(ABC):
 	"""Abstract class for edge weight transformations in WSBM."""
 	@abstractmethod
@@ -141,6 +147,42 @@ class LogTransform(ElementwiseTransform):
 
 	def __reduce__(self) -> tuple[type, tuple]:
 		return (self.__class__, ())
+	
+class LogPowerTransform(ElementwiseTransform):
+	"""Logarithmic power transformation: returns -log(A) ** γ 
+	for positive elements, 0 otherwise."""
+
+	def __init__(self, γ: float = 1.41):
+		"""Initialize the logarithmic power transformation with a parameter γ.\n
+		Parameters
+		----------
+		γ : float
+			The power parameter in the range [0.5, 2.0]. Default is 1.41.
+		"""
+
+		assert 0.5 <= γ <= 2.0, "γ must be in [0.5, 2.0]"
+
+		self.name = f"Log Power (γ = {γ})"
+		self.id = f'LogP-{γ:.2f}'
+		self.color = cmap_green(norm_logp(γ))
+
+		self.γ = γ
+		self.param_name = 'γ'
+	
+	def f_data(self, d: NDArray[np.float64]) -> NDArray[np.float64]:
+		td = np.clip(d, 0, 1)
+		td[td > 0] = (-np.log(td[td > 0])) ** self.γ
+		return td
+	
+	def __eq__(self, other) -> bool:
+		return isinstance(other, LogPowerTransform) and self.γ == other.γ
+
+	def __hash__(self) -> int:
+		return hash((LogPowerTransform, self.γ))
+
+	def __reduce__(self) -> tuple[type, tuple]:
+		return (self.__class__, (self.γ,))
+
 
 class ThresholdTransform(ElementwiseTransform):
 	"""Threshold transformation: returns 1 if A <= τ, 0 otherwise."""
@@ -246,6 +288,42 @@ class QuantileTransform(ElementwiseTransform):
 
 	def __hash__(self) -> int:
 		return hash((QuantileTransform, self.q))
+
+	def __reduce__(self) -> tuple[type, tuple]:
+		return (self.__class__, (self.q,))
+	
+class QuantileThresholding(ElementwiseTransform):
+	"""Quantile thresholding: returns 1 if A >= τ, 0 otherwise, 
+	where τ is the (1-q)-th quantile of positive elements in A."""
+
+	def __init__(self, q: float = 0.1):
+		"""Initialize the quantile thresholding with a quantile q.\n
+		Parameters
+		----------
+		q : float
+			The quantile value in the range [0.01, 0.5]. Default is 0.1.
+		"""
+
+		assert 0.01 <= q <= 0.5, "q must be in [0.01, 0.5]"
+
+		self.name = f"Quantile Thresholding (q = {q})"
+		self.id = f'QThr-{int(q*100):02d}'
+		self.color = cmap_purple(norm_qthr(q))
+
+		self.q = q
+		self.param_name = 'q'
+
+	def f_data(self, d: NDArray[np.float64]) -> NDArray[np.float64]:
+		td = d.copy()
+		τ = np.quantile(td[td > 0], 1 - self.q)
+		td[td > 0] = (td[td > 0] >= τ).astype(float)
+		return td
+	
+	def __eq__(self, other) -> bool:
+		return isinstance(other, QuantileThresholding) and self.q == other.q
+
+	def __hash__(self) -> int:
+		return hash((QuantileThresholding, self.q))
 
 	def __reduce__(self) -> tuple[type, tuple]:
 		return (self.__class__, (self.q,))
