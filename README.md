@@ -2,36 +2,77 @@
 
 ## Overview
 
-This project implements a framework for Weighted Stochastic Block Models (WSBM) with Chernoff-guided edge-weight transformations. It provides:
+This project implements a framework for Weighted Stochastic Block Models (WSBM) with Chernoff-guided edge-weight transformations.
 
-* Core WSBM models with different edge-weight distributions:
+...
 
-  * [`BetaWSBM`](src/models/beta.py)
-  * [`LognormWSBM`](src/models/lognorm.py)
-* A suite of transformations (`IdentityTransform`, `LogTransform`, `QuantileTransform`, `PowerTransform`, ...)
-* [`twsbm`](src/twsbm.py): contains the `TWSBM` class, which models a transformed weighted stochastic block model and computes a range of structural and embedding-based metrics.
-* Visualization utilities for embedding plots via [`plot_embeddings`](src/visualization/plot_embeddings.py)
 
 ## Repository Structure
 
 ```
-├── data/                           # raw and processed datasets  
-├── notebooks/                      # example workflows  
-│   └── plot_embeddings.ipynb  
-├── reports/                        # generated figures and reports  
-├── src/                            # source code  
-│   ├── metrics.py                  # graph metrics  
-│   ├── transformations.py          # weight transforms  
-│   ├── twsbm.py                    # Transformed WSBM base classes  
-│   ├── models/                     # WSBM implementations  
-│   │   ├── beta.py                 # Beta WSBM  
-│   │   ├── lognorm.py              # Lognormal WSBM  
-│   │   └── wsbm.py                 # Base WSBM  
-│   ├── utils/                      # string formatting & helpers  
-│   └── visualization/              # plotting code  
-│       └── plot_embeddings.py  
-├── requirements.txt                # Python dependencies  
-└── pyrightconfig.json              # type-checker config  
+/
+├── data/
+│   ├── processed/
+│   │   ├── graphs/
+│   │   ├── real_world_graphs/
+│   │   └── synthetic_graphs/
+│   └── raw/
+│       └── real_world_graphs/
+│           ├── cifar10/
+│           ├── fashionmnist/
+│           ├── high_school_2011/
+│           ├── high_school_2012/
+│           ├── high_school_2013/
+│           ├── mnist/
+│           ├── primary_school/
+│           ├── workplace_2013/
+│           └── workplace_2015/
+├── LICENSE
+├── notebooks/
+│   ├── compute.ipynb
+│   ├── plot_embeddings.ipynb
+│   └── plotting.ipynb
+├── README.md
+├── repo_tree.txt
+├── reports/
+│   └── figures/
+│       └── stacking_vs_chernoff_argmax/
+│           ├── by_graph/
+│           │   ├── Beta/
+│           │   ├── cifar10/
+│           │   ├── fashionmnist/
+│           │   ├── high_school_2011/
+│           │   ├── high_school_2012/
+│           │   ├── high_school_2013/
+│           │   ├── LogN/
+│           │   ├── mnist/
+│           │   ├── primary_school/
+│           │   ├── workplace_2013/
+│           │   └── workplace_2015/
+│           └── by_plot/
+│               ├── bars_families/
+│               ├── bars_families_stacked_vs_argmaxc/
+│               ├── bars_transforms/
+│               └── heatmap_families/
+├── requirements.txt
+└── src/
+    ├── metrics.py
+    ├── models/
+    │   ├── bc_registry.py
+    │   ├── beta.py
+    │   ├── lognorm.py
+    │   ├── wdcsbm.py
+    │   └── wsbm.py
+    ├── tdcsbm.py
+    ├── transformations.py
+    ├── twsbm.py
+    ├── utils/
+    │   ├── EGMM.py
+    │   ├── string_utils.py
+    │   └── utils.py
+    └── visualization/
+        └── plot_embeddings.py
+
 ```
 
 ## Installation
@@ -46,7 +87,7 @@ This project implements a framework for Weighted Stochastic Block Models (WSBM) 
 
 ## Usage
 
-Open and run the example in `notebooks/plot_embeddings.ipynb` to reproduce figures and explore different parameter settings.
+...
 
 ## Data
 
